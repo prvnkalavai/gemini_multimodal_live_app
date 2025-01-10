@@ -56,7 +56,7 @@ class _LiveAPIProviderWrapperState extends State<LiveAPIProviderWrapper> {
           onComplete: () {
             print("Audio playback complete");
           },
-          sampleRate: 24000, 
+          sampleRate: 24000,
           numChannels: 1);
 
       await _audioStreamer.init();
@@ -78,23 +78,23 @@ class _LiveAPIProviderWrapperState extends State<LiveAPIProviderWrapper> {
   Widget build(BuildContext context) {
     return _audioStreamerReady
         ? LiveAPIProvider(
-      apiKey: dotenv.env['GEMINI_API_KEY']!,
-      url:
-          'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent',
-      onAudioData: (data) {
-        print("Received audio data: ${data.length} bytes");
-       _audioStreamer.play(data);
-      },
-      onAudioComplete: () {
-           print("Received complete flag");
-            _audioStreamer.process();
-          },
-       onAudioStreamerReady: _audioStreamerReady,
-      child: const StreamingConsole(),
-      )
+            apiKey: dotenv.env['GEMINI_API_KEY']!,
+            url:
+                'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent',
+            onAudioData: (data) {
+              print("Received audio data: ${data.length} bytes");
+              _audioStreamer.play(data);
+            },
+            onAudioComplete: () {
+              print("Received complete flag");
+              _audioStreamer.process();
+            },
+            onAudioStreamerReady: _audioStreamerReady,
+            child: const StreamingConsole(),
+          )
         : const Scaffold(
             body: Center(child: CircularProgressIndicator()),
-    );
+          );
   }
 }
 

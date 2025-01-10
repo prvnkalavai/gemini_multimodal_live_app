@@ -34,13 +34,13 @@ class _LiveAPIProviderState extends State<LiveAPIProvider> {
   Function(ToolCall)? _onToolCall;
   Function(List<int>)? _onAudioData;
   bool _onAudioStreamerReady = false;
-    Function()? _onAudioComplete;
+  Function()? _onAudioComplete;
 
   @override
   void initState() {
     super.initState();
     _onAudioData = widget.onAudioData;
-     _onAudioComplete = widget.onAudioComplete;
+    _onAudioComplete = widget.onAudioComplete;
     _onAudioStreamerReady = widget.onAudioStreamerReady;
     _apiClient = ApiClient(url: widget.url, apiKey: widget.apiKey);
     _apiClient.onData = _handleData;
@@ -95,50 +95,34 @@ class _LiveAPIProviderState extends State<LiveAPIProvider> {
         jsonString = data.toString();
       }
 
-      print("Raw WebSocket data received");
-
       final jsonData = jsonDecode(jsonString);
-      print("Parsed the Raw Websocket data");
-      if (jsonData['setupComplete'] != null) {
-        print("Setup complete received");
-        return;
-      }
+
       if (jsonData['serverContent'] != null) {
         final serverContent = jsonData['serverContent'];
-         print("Server content received");
-          final modelTurn = serverContent['modelTurn'];
-           if (modelTurn != null) {
-            final parts = modelTurn['parts'] as List;
-             for (var part in parts) {
-                print("Iterating through parts");
-                 if (part['text'] != null) {
-                   print("Text response: ${part['text']}");
-                  }
-                if (part['inlineData'] != null) {
-                   final inlineData = part['inlineData'];
-                    print("Inline data received");
-                     print("Mime type: ${inlineData['mimeType']}");
+        final modelTurn = serverContent['modelTurn'];
 
-                    if (inlineData['mimeType'].toString().startsWith('audio/') &&
-                         _onAudioData != null) {
-                      final decoded = base64Decode(inlineData['data']);
-                       print("Audio data received - Length: ${decoded.length} bytes");
-                       print("Mime type: ${inlineData['mimeType']}");
-                       print("Status of audio streamer: $_onAudioStreamerReady");
-                      if (_onAudioStreamerReady) {
-                          _onAudioData!(decoded);
-                           print("Audio data sent to streamer for playback");
-                      } else {
-                       print("WARNING: Audio streamer not ready!");
-                       }
-                     }
-                 }
+        if (modelTurn != null) {
+          final parts = modelTurn['parts'] as List;
+          for (var part in parts) {
+            if (part['inlineData'] != null) {
+              final inlineData = part['inlineData'];
+
+              if (inlineData['mimeType'].toString().startsWith('audio/') &&
+                  _onAudioData != null) {
+                final decoded = base64Decode(inlineData['data']);
+                if (_onAudioStreamerReady) {
+                  _onAudioData!(decoded);
+                  // No need to wait for turnComplete to start processing
+                }
               }
             }
-            if (serverContent['turnComplete'] == true) {
-                  _onAudioComplete?.call();
-            }
+          }
+        }
 
+        // Handle turn completion
+        if (serverContent['turnComplete'] == true) {
+          _onAudioComplete?.call();
+        }
       }
     } catch (e, stack) {
       print("Error handling WebSocket data: $e");
@@ -184,9 +168,8 @@ class _LiveAPIContext extends InheritedWidget {
   final Function(ToolResponse) sendToolResponse;
   Function(ToolCall)? onToolCall;
   Function(List<int>)? onAudioData;
-   Function()? onAudioComplete;
+  Function()? onAudioComplete;
   bool onAudioStreamerReady;
-
 
   _LiveAPIContext({
     required this.apiClient,
@@ -197,7 +180,7 @@ class _LiveAPIContext extends InheritedWidget {
     required this.sendToolResponse,
     this.onToolCall,
     this.onAudioData,
-       this.onAudioComplete,
+    this.onAudioComplete,
     required this.onAudioStreamerReady,
     required super.child,
   });
@@ -231,12 +214,15 @@ class LiveAPIContext {
   static setOnToolCall(BuildContext context, Function(ToolCall)? callback) {
     of(context).onToolCall = callback;
   }
+
   static setOnAudioData(BuildContext context, Function(List<int>)? callback) {
     of(context).onAudioData = callback;
   }
-   static setOnAudioComplete(BuildContext context, Function()? callback) {
-      of(context).onAudioComplete = callback;
+
+  static setOnAudioComplete(BuildContext context, Function()? callback) {
+    of(context).onAudioComplete = callback;
   }
+
   static bool getOnAudioStreamerReady(BuildContext context) =>
       of(context).onAudioStreamerReady;
   static setOnAudioStreamerReady(BuildContext context, bool val) {
