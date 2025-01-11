@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:gemini_multimodal_live_app/lib/audio_recorder.dart';
 import 'package:gemini_multimodal_live_app/lib/video_capture.dart';
-import 'package:gemini_multimodal_live_app/lib/screen_capture.dart'; 
+import 'package:gemini_multimodal_live_app/lib/screen_capture.dart';
 import 'package:camera/camera.dart';
+import 'package:gemini_multimodal_live_app/contexts/live_api_context.dart';
+import 'package:gemini_multimodal_live_app/lib/utils.dart';
+import 'package:gemini_multimodal_live_app/core/models/live_message.dart';
 import 'audio_pulse.dart';
 
 class ControlTray extends StatefulWidget {
@@ -33,8 +36,25 @@ class _ControlTrayState extends State<ControlTray> {
   @override
   void initState() {
     super.initState();
+    _audioRecorder.initialize();
     _audioRecorder.on('volume', (volume) {
       setState(() => _volume = volume);
+    });
+
+    _audioRecorder.on('data', (data) {
+      print("Received data event from audioRecorder");
+      if (!_isMuted) {
+        final base64Audio = blobToBase64(data);
+        print("Sending audio data to LiveAPIContext ${base64Audio.length}");
+        LiveAPIContext.sendRealtimeInput(
+          context,
+          RealtimeInput(
+            mediaChunks: [
+              GenerativeContentBlob(mimeType: 'audio/webm', data: base64Audio),
+            ],
+          ),
+        );
+      }
     });
   }
 
@@ -127,13 +147,16 @@ class _ControlTrayState extends State<ControlTray> {
               ),
               if (widget.supportsVideo) ...[
                 const SizedBox(width: 16),
-                 IconButton(
-                  icon: Icon(_screenCapture != null ? Icons.screen_share : Icons.stop_screen_share),
+                IconButton(
+                  icon: Icon(_screenCapture != null
+                      ? Icons.screen_share
+                      : Icons.stop_screen_share),
                   onPressed: _toggleScreen,
                 ),
                 IconButton(
-                  icon: Icon(
-                      _videoCapture != null ? Icons.videocam : Icons.videocam_off),
+                  icon: Icon(_videoCapture != null
+                      ? Icons.videocam
+                      : Icons.videocam_off),
                   onPressed: _toggleVideo,
                 ),
               ],
@@ -150,7 +173,7 @@ class _ControlTrayState extends State<ControlTray> {
   void dispose() {
     _audioRecorder.dispose();
     _videoCapture?.dispose();
-        _screenCapture?.dispose();
+    _screenCapture?.dispose();
 
     super.dispose();
   }

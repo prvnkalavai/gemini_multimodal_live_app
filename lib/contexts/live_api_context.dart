@@ -75,6 +75,8 @@ class _LiveAPIProviderState extends State<LiveAPIProvider> {
   }
 
   void sendRealtimeInput(RealtimeInput input) {
+    print(
+        "LiveAPIContext received realtime input, media chunks: ${input.mediaChunks.length}"); // Log message
     final message = RealtimeInputMessage(realtimeInput: input);
     _apiClient.send(message.toJson());
     addToLog('Sent realtime input: ${message.toJson()}');

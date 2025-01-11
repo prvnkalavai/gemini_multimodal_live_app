@@ -1,16 +1,16 @@
 // lib/lib/audio_recorder.dart
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter_sound/flutter_sound.dart';
+import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:math';
 
 class AudioRecorder {
   FlutterSoundRecorder? _recorder;
   bool _isInitialized = false;
   bool _isRecording = false;
   final _eventController = StreamController<Map<String, dynamic>>.broadcast();
-  StreamSubscription? _recorderSubscription;
-  StreamController<Uint8List>? _audioStreamController;
+  StreamSubscription? _recordingStreamSubscription;
 
   Stream<Map<String, dynamic>> get onEvent => _eventController.stream;
 
@@ -19,12 +19,17 @@ class AudioRecorder {
 
     _recorder = FlutterSoundRecorder();
 
-    final status = await Permission.microphone.request();
-    if (status != PermissionStatus.granted) {
-      throw Exception('Microphone permission not granted');
+// Special handling for web platform
+    if (kIsWeb) {
+      await _recorder!.openRecorder();
+    } else {
+      final status = await Permission.microphone.request();
+      if (status != PermissionStatus.granted) {
+        throw Exception('Microphone permission not granted');
+      }
+      await _recorder!.openRecorder();
     }
 
-    await _recorder!.openRecorder();
     _isInitialized = true;
     print("Audio recorder initialized");
   }
@@ -38,7 +43,7 @@ class AudioRecorder {
   }
 
   void off(String event) {
-    _recorderSubscription?.cancel();
+    _recordingStreamSubscription?.cancel();
   }
 
   Future<void> start() async {
@@ -48,19 +53,40 @@ class AudioRecorder {
     print("Audio recorder starting...");
 
     try {
-      _audioStreamController = StreamController<Uint8List>();
+      // Configure recorder differently for web
+      if (kIsWeb) {
+        await _recorder!.startRecorder(
+          codec: Codec.opusWebM,
+          numChannels: 1,
+          sampleRate: 44100,
+          bitRate: 32000, // Standard web bitrate
+        );
+      } else {
+        await _recorder!.startRecorder(
+          codec: Codec.opusWebM,
+          numChannels: 1,
+          sampleRate: 16000,
+        );
+      }
 
-      await _recorder!.startRecorder(
-        codec: Codec.opusWebM,
-        toStream: _audioStreamController!.sink,
-        numChannels: 1,
-        sampleRate: 16000,
-      );
       _isRecording = true;
 
-      _recorderSubscription = _audioStreamController!.stream.listen(
-        (Uint8List data) {
-          _handleRecordingProgress(data);
+      // Set shorter subscription duration for more frequent updates
+      await _recorder!
+          .setSubscriptionDuration(const Duration(milliseconds: 100));
+
+      _recordingStreamSubscription = _recorder!.onProgress!.listen(
+        (RecordingDisposition? result) {
+          if (result != null && result.decibels != null) {
+            double volume = _calculateVolumeFromDecibels(result.decibels!);
+            print(
+                "Recording volume: $volume, Raw Decibels: ${result.decibels}"); // Debug log
+
+            _eventController.add({
+              'event': 'volume',
+              'data': volume.clamp(0.0, 1.0),
+            });
+          }
         },
         onError: (error) {
           print("Recording error: $error");
@@ -69,7 +95,7 @@ class AudioRecorder {
             'data': error.toString(),
           });
         },
-      );      
+      );
 
       print("Audio recorder started successfully");
     } catch (e) {
@@ -79,31 +105,27 @@ class AudioRecorder {
     }
   }
 
-  void _handleRecordingProgress(Uint8List data) {
-    _eventController.add({
-      'event': 'data',
-      'data': data,
-    });
-    // Calculate volume
-    double volume = _calculateVolume(data);
-    _eventController.add({
-      'event': 'volume',
-      'data': volume,
-    });
-    print('Audio data recorded and emitted ${data.length}');
-  }
+  double _calculateVolumeFromDecibels(double decibels) {
+// Flutter Sound on web typically provides decibels in range 0 to 100
+// Where 0 is silence and ~90-100 is very loud
+    const double minDb = 0.0;
+    const double maxDb = 100.0;
 
-  double _calculateVolume(Uint8List data) {
-    // Implement volume calculation from PCM data
-    // This is a simplified example
-    double sum = 0;
-    for (int i = 0; i < data.length; i += 2) {
-      int sample = data[i] | (data[i + 1] << 8);
-      sum += sample * sample;
-    }
-    double vol = sum / (data.length / 2);
-    print('Calculated volume $vol');
-    return vol;
+// Ensure decibels are within expected range
+    double clampedDecibels = decibels.clamp(minDb, maxDb);
+
+// Convert to 0-1 range
+    double normalizedVolume = clampedDecibels / maxDb;
+
+// Apply a curve to make the volume changes more natural
+// Using square root to make middle-range sounds more prominent
+    normalizedVolume = normalizedVolume.clamp(0.0, 1.0);
+    normalizedVolume = sqrt(normalizedVolume);
+
+    print(
+        "Raw dB: $decibels, Clamped: $clampedDecibels, Normalized: $normalizedVolume");
+
+    return normalizedVolume;
   }
 
   Future<void> stop() async {
@@ -111,9 +133,9 @@ class AudioRecorder {
 
     try {
       await _recorder?.stopRecorder();
-      await _audioStreamController?.close();
-      await _recorderSubscription?.cancel();
-      _audioStreamController = null;
+      await _recordingStreamSubscription
+          ?.cancel(); // Cancel the stream subscription
+      _recordingStreamSubscription = null;
       _isRecording = false;
       print("Audio recorder stopped");
     } catch (e) {
@@ -127,9 +149,7 @@ class AudioRecorder {
   void dispose() {
     stop();
     _recorder?.closeRecorder();
-    _recorderSubscription?.cancel();
-    _audioStreamController?.close();
-    _audioStreamController = null;
+    _recordingStreamSubscription?.cancel();
     _eventController.close();
     _isInitialized = false;
     _isRecording = false;

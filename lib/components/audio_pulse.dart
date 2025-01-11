@@ -19,13 +19,15 @@ class AudioPulse extends StatelessWidget {
       height: 40,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: active ? Colors.blue.withValues(blue: 0.2) : Colors.grey.withValues(alpha: 0.2),
+        color: active
+            ? Colors.blue.withValues(blue: 0.2)
+            : Colors.grey.withValues(alpha: 0.2),
       ),
       child: Center(
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 100),
-          width: 8 + (volume * 4),
-          height: 8 + (volume * 4),
+          width: 8 + (volume * 20),
+          height: 8 + (volume * 20),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: active ? Colors.blue : Colors.grey,
