@@ -1,158 +1,146 @@
-// lib/lib/audio_recorder.dart
 import 'dart:async';
-import 'package:flutter_sound/flutter_sound.dart';
-import 'package:flutter/foundation.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'dart:math';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_sound/flutter_sound.dart';
+import 'package:permission_handler/permission_handler.dart';
 
+/// Captures audio in real time on mobile, emitting two types of events:
+///   1) 'volume': decibel-based volume readings for a UI meter
+///   2) 'data': small chunks of raw audio bytes for streaming to Gemini
+///
+/// Ignored on web (throwing an error instead).
 class AudioRecorder {
   FlutterSoundRecorder? _recorder;
+
+  // StreamController used to gather raw audio chunks
+  final _audioDataController = StreamController<Uint8List>.broadcast();
+  StreamSubscription<Uint8List>? _audioDataSubscription;
+
+  // This event controller broadcasts events to outside listeners
+  final _eventController = StreamController<Map<String, dynamic>>.broadcast();
+
   bool _isInitialized = false;
   bool _isRecording = false;
-  final _eventController = StreamController<Map<String, dynamic>>.broadcast();
-  StreamSubscription? _recordingStreamSubscription;
 
+  /// Expose a stream of { event: 'volume'|'data'|'error', data: <dynamic> } objects
   Stream<Map<String, dynamic>> get onEvent => _eventController.stream;
 
-  Future<void> initialize() async {
-    if (_isInitialized) return;
-
-    _recorder = FlutterSoundRecorder();
-
-// Special handling for web platform
-    if (kIsWeb) {
-      await _recorder!.openRecorder();
-    } else {
-      final status = await Permission.microphone.request();
-      if (status != PermissionStatus.granted) {
-        throw Exception('Microphone permission not granted');
-      }
-      await _recorder!.openRecorder();
-    }
-
-    _isInitialized = true;
-    print("Audio recorder initialized");
-  }
-
-  void on(String event, Function callback) {
-    _eventController.stream.listen((data) {
-      if (data['event'] == event) {
-        callback(data['data']);
+  /// Subscribe to a named event easily
+  void on(String eventName, Function(dynamic) callback) {
+    _eventController.stream.listen((event) {
+      if (event['event'] == eventName) {
+        callback(event['data']);
       }
     });
   }
 
-  void off(String event) {
-    _recordingStreamSubscription?.cancel();
+  /// Initialize the recorder for mobile only; if web, throws an error
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+
+    if (kIsWeb) {
+      throw UnsupportedError('AudioRecorder does not support web in this snippet.');
+    }
+
+    // Request microphone permission
+    final micStatus = await Permission.microphone.request();
+    if (micStatus != PermissionStatus.granted) {
+      throw Exception('Microphone permission not granted');
+    }
+
+    _recorder = FlutterSoundRecorder();
+    await _recorder!.openRecorder();
+    _isInitialized = true;
+    print('[AudioRecorder] Initialized successfully.');
   }
 
+  /// Start the recorder in streaming mode, piping raw chunks to _audioDataController
   Future<void> start() async {
     if (!_isInitialized) await initialize();
     if (_isRecording) return;
 
-    print("Audio recorder starting...");
+    print('[AudioRecorder] Starting capture...');
+    _isRecording = true;
 
-    try {
-      // Configure recorder differently for web
-      if (kIsWeb) {
-        await _recorder!.startRecorder(
-          codec: Codec.opusWebM,
-          numChannels: 1,
-          sampleRate: 44100,
-          bitRate: 32000, // Standard web bitrate
-        );
-      } else {
-        await _recorder!.startRecorder(
-          codec: Codec.opusWebM,
-          numChannels: 1,
-          sampleRate: 16000,
-        );
+    // IMPORTANT: For real-time chunk audio, specify toStream: _audioDataController.sink
+    // so flutter_sound sends raw audio in small bursts (e.g. ~10-20ms blocks).
+    await _recorder!.startRecorder(
+      toStream: _audioDataController.sink,  // <--- critical for chunk streaming
+      codec: Codec.pcm16WAV,                // or Codec.opusWebM, etc.
+      numChannels: 1,
+      sampleRate: 16000,                    // or your desired sample rate
+      bitRate: 32000,                       // if using opus-based encoding
+    );
+
+    // Listen for raw chunks from _audioDataController.
+    _audioDataSubscription = _audioDataController.stream.listen(
+      (Uint8List chunk) {
+        // Each chunk is raw PCM or compressed data, depending on codec
+        print('[AudioRecorder] Got an audio chunk of size ${chunk.lengthInBytes}');
+        // Emit a "data" event to external code (control_tray).
+        _eventController.add({'event': 'data', 'data': chunk});
+      },
+      onError: (error) {
+        print('[AudioRecorder] Data stream error: $error');
+        _eventController.add({'event': 'error', 'data': error.toString()});
+      },
+    );
+
+    // Optionally, also monitor decibels for a volume meter
+    // setSubscriptionDuration controls how often onProgress fires
+    await _recorder!.setSubscriptionDuration(const Duration(milliseconds: 100));
+    _recorder!.onProgress?.listen((disposition) {
+      if (disposition.decibels != null) {
+        final vol = _calculateVolumeFromDecibels(disposition.decibels!);
+        _eventController.add({'event': 'volume', 'data': vol});
       }
+    });
 
-      _isRecording = true;
-
-      // Set shorter subscription duration for more frequent updates
-      await _recorder!
-          .setSubscriptionDuration(const Duration(milliseconds: 100));
-
-      _recordingStreamSubscription = _recorder!.onProgress!.listen(
-        (RecordingDisposition? result) {
-          if (result != null && result.decibels != null) {
-            double volume = _calculateVolumeFromDecibels(result.decibels!);
-            print(
-                "Recording volume: $volume, Raw Decibels: ${result.decibels}"); // Debug log
-
-            _eventController.add({
-              'event': 'volume',
-              'data': volume.clamp(0.0, 1.0),
-            });
-          }
-        },
-        onError: (error) {
-          print("Recording error: $error");
-          _eventController.add({
-            'event': 'error',
-            'data': error.toString(),
-          });
-        },
-      );
-
-      print("Audio recorder started successfully");
-    } catch (e) {
-      print("Error starting recorder: $e");
-      _isRecording = false;
-      rethrow;
-    }
+    print('[AudioRecorder] Started recording successfully.');
   }
 
-  double _calculateVolumeFromDecibels(double decibels) {
-// Flutter Sound on web typically provides decibels in range 0 to 100
-// Where 0 is silence and ~90-100 is very loud
-    const double minDb = 0.0;
-    const double maxDb = 100.0;
-
-// Ensure decibels are within expected range
-    double clampedDecibels = decibels.clamp(minDb, maxDb);
-
-// Convert to 0-1 range
-    double normalizedVolume = clampedDecibels / maxDb;
-
-// Apply a curve to make the volume changes more natural
-// Using square root to make middle-range sounds more prominent
-    normalizedVolume = normalizedVolume.clamp(0.0, 1.0);
-    normalizedVolume = sqrt(normalizedVolume);
-
-    print(
-        "Raw dB: $decibels, Clamped: $clampedDecibels, Normalized: $normalizedVolume");
-
-    return normalizedVolume;
-  }
-
+  /// Stop the recording stream
   Future<void> stop() async {
     if (!_isRecording) return;
 
+    print('[AudioRecorder] Stopping capture...');
     try {
       await _recorder?.stopRecorder();
-      await _recordingStreamSubscription
-          ?.cancel(); // Cancel the stream subscription
-      _recordingStreamSubscription = null;
+      await _audioDataSubscription?.cancel();
+      _audioDataSubscription = null;
       _isRecording = false;
-      print("Audio recorder stopped");
-    } catch (e) {
-      print("Error stopping recorder: $e");
-      rethrow;
+      print('[AudioRecorder] Stopped successfully.');
+    } catch (e, st) {
+      print('[AudioRecorder] Error stopping recorder: $e\n$st');
     }
   }
 
-  bool get isRecording => _isRecording;
-
+  /// Clean up resources
   void dispose() {
     stop();
     _recorder?.closeRecorder();
-    _recordingStreamSubscription?.cancel();
+    _audioDataSubscription?.cancel();
+    _audioDataController.close();
     _eventController.close();
     _isInitialized = false;
     _isRecording = false;
-    print("Audio recorder disposed");
+    print('[AudioRecorder] Disposed.');
+  }
+
+  /// True if currently capturing
+  bool get isRecording => _isRecording;
+
+  /// Convert decibels (0..something) to a 0..1 volume meter
+  double _calculateVolumeFromDecibels(double decibels) {
+    // Typically 0 dB is near silence, ~100 dB is loud
+    const double minDb = 0.0;
+    const double maxDb = 100.0;
+
+    double clampedDb = decibels.clamp(minDb, maxDb);
+    double normalized = clampedDb / maxDb;
+
+    // Apply a square root curve to emphasize mid-range volumes
+    return sqrt(normalized);
   }
 }

@@ -2,9 +2,11 @@
 import 'package:flutter/material.dart';
 import 'app.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart';
 
 void main() async {
-  await dotenv.load(fileName: ".env");
+  String envFile =  kIsWeb ? ".env" : ".env";
+  await dotenv.load(fileName: envFile);
   runApp(const MyApp());
 }
 
