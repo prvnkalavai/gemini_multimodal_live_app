@@ -76,7 +76,7 @@ class _LiveAPIProviderState extends State<LiveAPIProvider> {
 
   void sendRealtimeInput(RealtimeInput input) {
     print(
-        "LiveAPIContext received realtime input, media chunks: ${input.mediaChunks.length}"); // Log message
+        "[LiveAPIContext] Received realtime input, media chunks: ${input.mediaChunks.length}"); // Log message
     final message = RealtimeInputMessage(realtimeInput: input);
     _apiClient.send(message.toJson());
     addToLog('Sent realtime input: ${message.toJson()}');
@@ -90,6 +90,7 @@ class _LiveAPIProviderState extends State<LiveAPIProvider> {
 
   void _handleData(dynamic data) {
     try {
+      print("[LiveAPIContext] Received raw data type: ${data.runtimeType}");
       String jsonString;
       if (data is List<int>) {
         jsonString = String.fromCharCodes(data);

@@ -39,13 +39,21 @@ class _ControlTrayState extends State<ControlTray> {
     _audioRecorder.initialize();
     _audioRecorder.on('volume', (volume) {
       setState(() => _volume = volume);
+      print('Volume: $volume');
     });
 
     _audioRecorder.on('data', (data) {
-      print("Received data event from audioRecorder");
+      print(
+          "[ControlTray] Received data event from audioRecorder, data size: ${data.length}");
+          
       if (!_isMuted) {
         final base64Audio = blobToBase64(data);
-        print("Sending audio data to LiveAPIContext ${base64Audio.length}");
+        print(
+            "[ControlTray] Sending audio data to LiveAPIContext, base64 size: ${base64Audio.length}");
+        if (base64Audio.isEmpty)
+          print(
+              "[ControlTray] base64Audio is empty, something might be wrong with encoding.");
+
         LiveAPIContext.sendRealtimeInput(
           context,
           RealtimeInput(
@@ -63,8 +71,10 @@ class _ControlTrayState extends State<ControlTray> {
       _isMuted = !_isMuted;
       if (_isMuted) {
         _audioRecorder.stop();
+        print("[ControlTray] Mute ON, audio recorder stopped.");
       } else {
         _audioRecorder.start();
+        print("[ControlTray] Mute OFF, audio recorder started.");
       }
     });
   }

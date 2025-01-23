@@ -16,8 +16,12 @@ class ApiClient {
     final fullUrl = '$url?key=$apiKey';
     _channel = WebSocketChannel.connect(Uri.parse(fullUrl));
     print('Connected to $fullUrl');
+
     _channel!.stream.listen(
-      onData,
+      (data) {
+        print('[ApiClient] Received data: $data'); // Log incoming message
+        onData?.call(data);
+      },
       onDone: onDone,
       onError: onError,
     );
@@ -25,6 +29,7 @@ class ApiClient {
 
   void send(Map<String, dynamic> message) {
     if (_channel != null ) {
+      print('[ApiClient] Sending message: ${jsonEncode(message)}'); // Log outgoing message
       _channel!.sink.add(jsonEncode(message));
     }
   }
